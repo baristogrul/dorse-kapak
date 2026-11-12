@@ -369,7 +369,10 @@ async function toggleScan() {
     keepAwake();
   } catch (e) {
     navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
-    scan = null; msg('Tarama başlatılamadı: ' + e.message + ' (Bluetooth ve Konum açık mı, izin verildi mi?)');
+    scan = null;
+    msg(/adapter not available/i.test(e.message)
+      ? "Chrome Bluetooth'a erişemiyor: Bluetooth açık mı? Ayarlar → Uygulamalar → Chrome → İzinler'den \"Yakındaki cihazlar\" ve \"Konum\" izinlerini verin, Chrome'u kapatıp yeniden açın."
+      : 'Tarama başlatılamadı: ' + e.message + ' (Bluetooth ve Konum açık mı, izin verildi mi?)');
   }
   render();
 }

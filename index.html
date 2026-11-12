@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1419">
+<title>Dorse Kapak</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root { --bg:#0f1419; --card:#1a212b; --fg:#e6edf3; --mut:#8b98a5; --line:#2a3441;
+          --ok:#3fb950; --warn:#d29922; --bad:#f85149; --blue:#58a6ff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; padding:12px 12px 40px; background:var(--bg); color:var(--fg); font:15px system-ui,Segoe UI,sans-serif; }
+  header { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  h1 { font-size:18px; margin:0; flex:1; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:10px; }
+  .card h2 { font-size:13px; color:var(--mut); margin:0 0 8px; font-weight:600; }
+  #status { font-size:24px; font-weight:700; padding:16px 10px; border-radius:10px; text-align:center; background:var(--card); border:2px solid var(--line); }
+  #status.KAPALI { border-color:var(--ok); color:var(--ok); }
+  #status.lift { border-color:var(--warn); color:var(--warn); }
+  #status.alarm { border-color:var(--bad); color:var(--bad); background:#3a1618; animation:blink 1s infinite; }
+  @keyframes blink { 50% { background:#5a1c1f; } }
+  .metrics { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+  .metric { background:var(--card); border:2px solid var(--line); border-radius:10px; padding:10px; text-align:center; }
+  .metric .v { font-size:30px; font-weight:700; }
+  .metric .k { font-size:12px; color:var(--mut); }
+  .metric.on { border-color:var(--bad); } .metric.off { border-color:var(--ok); } .metric.warn { border-color:var(--warn); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  button { background:#238636; color:#fff; border:0; border-radius:8px; padding:12px 14px; font-size:15px; cursor:pointer; }
+  button.sec { background:#30363d; } button.red { background:#8e2a2a; } button.small { padding:6px 10px; font-size:13px; }
+  button:active { filter:brightness(1.25); }
+  button.grow { flex:1; }
+  #scanbtn.on { background:#8e2a2a; }
+  canvas { width:100%; height:340px; display:block; touch-action:none; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { padding:5px 4px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  th { color:var(--mut); font-weight:600; }
+  .scroll { overflow-x:auto; }
+  .mut { color:var(--mut); font-size:13px; } .alarm-row td { color:var(--bad); font-weight:600; }
+  input[type=number], input[type=text] { background:#0d1117; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font-size:15px; }
+  input[type=number] { width:76px; }
+  input[type=text] { width:100%; font-family:ui-monospace,monospace; }
+  label.f { display:grid; grid-template-columns:1fr auto; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--line); }
+  #msg { color:var(--warn); min-height:0; margin-top:8px; }
+  #msg:empty { display:none; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--line); display:inline-block; }
+  .dot.on { background:var(--ok); }
+  .seg { display:flex; } .seg button { border-radius:0; } .seg button:first-child { border-radius:8px 0 0 8px; } .seg button:last-child { border-radius:0 8px 8px 0; }
+  .seg button.act { background:#1f6feb; }
+  details summary { cursor:pointer; color:var(--mut); font-weight:600; font-size:13px; }
+  #help ol { margin:6px 0 0 18px; padding:0; line-height:1.6; }
+  code { background:#0d1117; padding:1px 4px; border-radius:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Dorse Kapak İzleyici</h1>
+  <span class="dot" id="rxdot" title="reklam alınıyor"></span>
+  <button id="scanbtn" onclick="toggleScan()">Taramayı başlat</button>
+</header>
+<div id="status">BEKLENİYOR</div>
+<div class="metrics">
+  <div class="metric" id="mlift"><div class="k">Dorse açısı</div><div class="v" id="liftnow">-</div><div class="k" id="liftst">-</div></div>
+  <div class="metric" id="mdoor"><div class="k">Kapak açısı (fark)</div><div class="v" id="relnow">-</div><div class="k" id="doorst">-</div></div>
+</div>
+<div id="msg"></div>
+
+<div class="card" id="help" style="display:none">
+  <h2>Bu tarayıcıda BLE taraması yok</h2>
+  <ol>
+    <li>Android'de <b>Chrome</b> ile açın.</li>
+    <li>Adres çubuğuna <code>chrome://flags/#enable-experimental-web-platform-features</code> yazın, <b>Enabled</b> yapın, Chrome'u yeniden başlatın.</li>
+    <li>Telefonda Bluetooth ve Konum açık olsun; Chrome'a "Yakındaki cihazlar" ve konum izni verin.</li>
+    <li>Sayfa <b>https://</b> ile açılmış olmalı.</li>
+  </ol>
+</div>
+
+<div class="row">
+  <button class="grow" onclick="calibrate('rest')">① Offset al</button>
+  <button class="red" onclick="confirm('Kalibrasyon silinsin mi?') && calibrate('clear')">Sil</button>
+</div>
+<div class="mut" id="calinfo" style="margin-top:6px"></div>
+
+<div class="card">
+  <div class="row" style="margin:0 0 8px;justify-content:space-between">
+    <h2 style="margin:0">Vektörler</h2>
+    <div class="seg"><button class="small sec act" id="vb_cor" onclick="setView('cor')">Offset sonrası</button><button class="small sec" id="vb_raw" onclick="setView('raw')">Ham</button></div>
+  </div>
+  <canvas id="vec"></canvas>
+  <div class="mut">Sürükleyerek döndürün, çift dokunuşla sıfırlayın.</div>
+</div>
+
+<div class="card"><h2>Olaylar</h2><div class="scroll"><table id="events"></table></div></div>
+
+<div class="card"><h2>Cihazlar</h2><div class="scroll" id="live"></div></div>
+
+<div class="card">
+  <h2>Etraftaki IMU beacon'ları</h2>
+  <div class="scroll" id="seen"><span class="mut">Tarama başlayınca listelenir.</span></div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Ayarlar</summary>
+    <label class="f">Kapak AÇILDI açısı (°)<input type="number" id="door_on" step="1" min="1"></label>
+    <label class="f">Dorse kalkış açısı (°)<input type="number" id="lift_on" step="1" min="1"></label>
+    <label class="f">Kayan ortalama (sn)<input type="number" id="ma_s" step="0.5" min="0.5" max="30"></label>
+    <label class="f">Sesli uyarı<input type="checkbox" id="sound" style="width:22px;height:22px" onchange="CFG.sound = this.checked; saveCfg_()"></label>
+    <div class="row"><button class="grow" onclick="saveCfg()">Uygula</button></div>
+    <div class="mut" id="hyst" style="margin-top:6px"></div>
+    <div style="margin-top:14px">
+      <div class="mut">Kapak cihazı MAC</div><input type="text" id="door_mac" spellcheck="false" autocapitalize="characters">
+      <div class="mut" style="margin-top:8px">Gövde cihazı MAC</div><input type="text" id="body_mac" spellcheck="false" autocapitalize="characters">
+      <div class="row"><button class="sec grow" onclick="saveMacs()">MAC'leri kaydet</button><button class="sec" onclick="swap()">Rolleri değiştir</button></div>
+      <div class="mut" style="margin-top:6px">MAC değişince kalibrasyon ve olaylar silinir.</div>
+    </div>
+    <div class="row"><button class="sec small" onclick="confirm('Olay listesi silinsin mi?') && (events.length = 0, saveEvents(), render())">Olayları temizle</button></div>
+  </details>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Saha kalibrasyonu nasıl yapılır</summary>
+    <ol style="margin:8px 0 0 18px;padding:0;line-height:1.6">
+      <li>Cihazları istediğiniz yönde takın; dorse düz, kapak kapalı, araç sabit.</li>
+      <li><b>① Offset al</b>: iki cihazın yerçekimi vektörü ve aralarındaki fark kaydedilir. Cihazlar sabit değilse reddeder.</li>
+      <li>Kapak kapalıyken iki cihaz aynı miktarda eğilir; fark eşiği aşarsa <b>KAPAK AÇILDI</b>.</li>
+      <li>Dorse ilk kez kalkıp sabitlenince (kapak kapalı) ikinci referans otomatik alınır, ölçüm hassaslaşır. Yanlış alındıysa kalibrasyonu silip baştan başlayın.</li>
+      <li>Ekran kapanırsa ya da Chrome arka plana alınırsa tarama durur; tarama sırasında ekran açık tutulur.</li>
+    </ol>
+    <div id="calvec" class="mut" style="margin-top:8px"></div>
+  </details>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const FEAA = '0000feaa', FEAB = '0000feab';
+const TICK_S = 0.5, HOLD_S = 5, CAL_SPAN_S = 40, MA_STEPS = 10, OPEN_CONFIRM = 3;
+const DYN_MIN = 800, DYN_MAX = 1200, AUTO_REF_DIFF = 3.0, STILL_DEG = 3.0;
+
+// ---------- kalıcı ayarlar (localStorage; erişilemezse bellekte çalışır) ----------
+const load = k => { try { return JSON.parse(localStorage.getItem('dorse.' + k)); } catch (e) { return null; } };
+const store = (k, v) => { try { localStorage.setItem('dorse.' + k, JSON.stringify(v)); } catch (e) {} };
+
+const CFG = Object.assign({door_mac:'ED:91:36:06:34:DD', body_mac:'E9:21:BB:F9:B1:F4',
+                           lift_on:10, lift_off:6, door_on:15, door_off:8, ma_s:2, sound:true}, load('cfg'));
+const cal = Object.assign({rest:null, lifted:null, R:null, time:null}, load('cal'));
+const events = load('events') || [];
+const sm = {lifted:false, open:false, state:'BEKLENİYOR', open_cnt:0};
+let samples = {}, live = {}, recent = {}, seen = {}, idMac = {}, last = null, lastRx = 0;
+
+const saveCfg_ = () => store('cfg', CFG);
+const saveCal = () => store('cal', {rest:cal.rest, lifted:cal.lifted, time:cal.time});
+const saveEvents = () => store('events', events.slice(0, 200));
+
+// ---------- 3x3 vektör yardımcıları ----------
+const dot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const cross = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const norm = a => Math.sqrt(dot(a, a));
+const unit = a => { const n = norm(a); return n ? a.map(x => x/n) : [0, 0, 0]; };
+const matvec = (M, v) => M.map(r => dot(r, v));
+const angleDeg = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(unit(a), unit(b))))) * 180/Math.PI;
+const r1 = x => Math.round(x*10)/10;
+
+function triad(v1, v2) {
+  const t1 = unit(v1), t2 = unit(cross(v1, v2));
+  return [t1, t2, cross(t1, t2)];
+}
+function minRotation(a, b) {
+  // a'yı b'ye götüren en kısa dönüş (yalnızca gravity biliniyorsa)
+  a = unit(a); b = unit(b);
+  const v = cross(a, b), c = dot(a, b), I = (i, j) => i === j ? 1 : 0;
+  if (c < -0.999999) {
+    const ax = unit(cross(a, Math.abs(a[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
+    return [0, 1, 2].map(i => [0, 1, 2].map(j => 2*ax[i]*ax[j] - I(i, j)));
+  }
+  const vx = [[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]], k = 1/(1 + c);
+  const vx2 = [0, 1, 2].map(i => [0, 1, 2].map(j => vx[i][0]*vx[0][j] + vx[i][1]*vx[1][j] + vx[i][2]*vx[2][j]));
+  return [0, 1, 2].map(i => [0, 1, 2].map(j => I(i, j) + vx[i][j] + k*vx2[i][j]));
+}
+function buildRotation() {
+  // Kapak çerçevesinden dorse çerçevesine dönüş matrisi
+  if (!cal.rest) return null;
+  const a1 = cal.rest.door, b1 = cal.rest.body, lf = cal.lifted;
+  if (lf && angleDeg(a1, lf.door) > 5 && angleDeg(b1, lf.body) > 5) {
+    const T = triad(a1, lf.door), S = triad(b1, lf.body);
+    return [0, 1, 2].map(i => [0, 1, 2].map(j => S[0][i]*T[0][j] + S[1][i]*T[1][j] + S[2][i]*T[2][j]));
+  }
+  return minRotation(a1, b1);
+}
+cal.R = buildRotation();
+
+function normMac(s) {
+  const u = String(s).toUpperCase(), h = u.replace(/[^0-9A-F]/g, '');
+  return h.length === 12 && !/[^0-9A-F:\-. ]/.test(u) ? h.match(/../g).join(':') : null;
+}
+
+// ---------- karar mantığı (imu_monitor.py ile aynı) ----------
+function addEvent(e) { events.unshift(e); events.length = Math.min(events.length, 200); saveEvents(); }
+
+function isStill(role) {
+  // Cihazın kayan ortalama vektörü son ≥4 sn'de oynamadı mı?
+  const w = recent[role === 'door' ? CFG.door_mac : CFG.body_mac] || [];
+  if (!w.length) return false;
+  const lt = w[w.length-1][0], old = w.slice().reverse().find(x => lt - x[0] >= 4);
+  return !!old && angleDeg(w[w.length-1][1], old[1]) <= STILL_DEG;
+}
+
+function evaluate(entry) {
+  entry.lift = entry.door_rel = null;
+  const held = mac => { const w = recent[mac]; return w && w.length && entry.t - w[w.length-1][0] <= HOLD_S ? w[w.length-1][1] : null; };
+  const gd = held(CFG.door_mac), gb = held(CFG.body_mac);
+  if (!(gd && gb && cal.rest)) return;
+  // Referans = gövde cihazı. Her iki cihazın dinlenme vektöründen ne kadar saptığı ölçülür.
+  const tiltB = angleDeg(gb, cal.rest.body), tiltD = angleDeg(gd, cal.rest.door);
+  entry.lift = r1(tiltB); entry.door_tilt = r1(tiltD);
+  const lifted = tiltB > (sm.lifted ? CFG.lift_off : CFG.lift_on);
+  let rel;
+  if (cal.lifted) rel = angleDeg(matvec(cal.R, gd), gb);
+  else {
+    rel = Math.abs(tiltD - tiltB);
+    if (lifted && rel < AUTO_REF_DIFF && isStill('door') && isStill('body')) {
+      // dorse sabit kalkık ve iki cihaz uyumlu -> kapak kapalı varsay, ikinci referansı otomatik al
+      cal.lifted = {door:gd, body:gb}; cal.R = buildRotation(); cal.time = Date.now()/1000; saveCal();
+      rel = angleDeg(matvec(cal.R, gd), gb);
+      addEvent({t:entry.t, state:'Kalkık referans otomatik alındı', lift:entry.lift, door_rel:r1(rel), alarm:false});
+    }
+  }
+  entry.door_rel = r1(rel);
+  // |a| ≈ 1 g'den uzaksa doğrusal ivme var; bu adımda karar verme, önceki durumu koru
+  if (![gd, gb].every(g => DYN_MIN <= norm(g) && norm(g) <= DYN_MAX)) { entry.dyn = true; return; }
+  const rawOpen = rel > (sm.open ? CFG.door_off : CFG.door_on);
+  sm.open_cnt = rawOpen ? sm.open_cnt + 1 : 0;
+  const opened = sm.open ? rawOpen : sm.open_cnt >= OPEN_CONFIRM;
+  const state = lifted && opened ? 'KAPAK AÇILDI (dorse kalkık)' : lifted ? 'DORSE KALDIRILDI'
+              : opened ? 'KAPAK AÇIK (dorse inik)' : 'KAPALI';
+  if (state !== sm.state) {
+    addEvent({t:entry.t, state, lift:entry.lift, door_rel:entry.door_rel, alarm:lifted && opened});
+    if (lifted && opened) alarm();
+  }
+  Object.assign(sm, {lifted, open:opened, state});
+}
+
+function interp(buf, t) {
+  // buf = [[t, x, y, z, rssi]] zamana göre sıralı; t anındaki [x, y, z] (doğrusal enterpolasyon)
+  for (let i = buf.length - 1; i > 0; i--) {
+    if (buf[i-1][0] <= t) {
+      const a = buf[i-1], b = buf[i], f = b[0] > a[0] ? Math.min(1, Math.max(0, (t - a[0])/(b[0] - a[0]))) : 1;
+      return [1, 2, 3].map(k => a[k] + (b[k] - a[k])*f);
+    }
+  }
+  return buf[0].slice(1, 4);
+}
+
+function tick() {
+  const now = Date.now()/1000, entry = {t:now, dev:{}}, bufs = {};
+  for (const mac of [CFG.door_mac, CFG.body_mac]) {
+    const b = samples[mac];
+    if (b && b.length >= 2 && now - b[b.length-1][0] <= HOLD_S) bufs[mac] = b;
+  }
+  const macs = Object.keys(bufs);
+  if (macs.length) {
+    // İki cihazın da örneği olan en son anı ortak değerlendirme anı al, her cihazın enterpolasyonlu
+    // sinyalinin ma_s'lik ortalamasını o ana göre hesapla (okuma sırası farkı yapay açı üretmesin).
+    const tEval = Math.min(...macs.map(m => bufs[m][bufs[m].length-1][0]));
+    for (const m of macs) {
+      const buf = bufs[m], pts = [];
+      for (let k = 0; k < MA_STEPS; k++) pts.push(interp(buf, Math.max(buf[0][0], tEval - CFG.ma_s*k/(MA_STEPS - 1))));
+      const v = [0, 1, 2].map(i => pts.reduce((s, p) => s + p[i], 0)/MA_STEPS);
+      entry.dev[m] = v;
+      (recent[m] = recent[m] || []).push([now, v]);
+      if (recent[m].length > 20) recent[m].splice(0, recent[m].length - 20);
+    }
+    evaluate(entry);
+    last = entry;
+  }
+  render();
+}
+
+function averagedRecent() {
+  // Kayan ortalama vektörlerinin şimdiki ve ≥4 sn önceki değerinin ortalaması
+  const res = {}, now = Date.now()/1000;
+  for (const [role, mac] of [['door', CFG.door_mac], ['body', CFG.body_mac]]) {
+    const name = role === 'door' ? 'Kapak' : 'Gövde';
+    const w = (recent[mac] || []).filter(x => now - x[0] <= CAL_SPAN_S);
+    const old = w.length ? w.slice().reverse().find(x => w[w.length-1][0] - x[0] >= 4) : null;
+    if (!w.length || now - w[w.length-1][0] > 5 || !old) return [null, `${name} cihazından yeterli veri yok, ~10 sn bekleyin`];
+    const a = old[1], b = w[w.length-1][1], d = angleDeg(a, b);
+    if (d > STILL_DEG) return [null, `${name} cihazı sabit değil (${d.toFixed(1)}° oynadı), sabitleyip tekrar deneyin`];
+    const avg = [0, 1, 2].map(i => (a[i] + b[i])/2), mag = norm(avg);
+    if (mag < 850 || mag > 1150) return [null, `${name} cihazı ivme büyüklüğü ${mag.toFixed(0)} mg (≈1000 olmalı), hareket var`];
+    res[role] = avg;
+  }
+  return [res, null];
+}
+
+function resetSm() { Object.assign(sm, {lifted:false, open:false, state:'BEKLENİYOR', open_cnt:0}); }
+function resetData() {
+  samples = {}; live = {}; recent = {}; last = null; events.length = 0; saveEvents();
+  Object.assign(cal, {rest:null, lifted:null, R:null, time:null}); saveCal(); resetSm();
+}
+
+function calibrate(kind) {
+  if (kind === 'clear') { Object.assign(cal, {rest:null, lifted:null, R:null, time:null}); resetSm(); }
+  else {
+    const [avg, err] = averagedRecent();
+    if (err) return msg(err);
+    Object.assign(cal, {rest:avg, lifted:null, time:Date.now()/1000}); cal.R = buildRotation();
+    msg('Offset alındı', true);
+  }
+  saveCal(); render();
+}
+
+// ---------- BLE (Web Bluetooth requestLEScan) ----------
+const macAt = (dv, o) => Array.from({length:6}, (_, i) => dv.getUint8(o + i).toString(16).padStart(2, '0')).join(':').toUpperCase();
+
+function onAdv(ev) {
+  const now = Date.now()/1000;
+  let mac = idMac[ev.device.id], acc = null, tlm = null, info = null;
+  for (const [uuid, dv] of ev.serviceData) {
+    const u = String(uuid).toLowerCase();
+    if (u.startsWith(FEAB) && dv.byteLength >= 13) {
+      const t = dv.getUint8(0);
+      if (t === 0x60 && dv.byteLength >= 21) {        // 60 00 rate 01 00 01 X Y Z batt 00 MAC
+        const g = o => (dv.getInt16(o) >> 6)*4;
+        acc = {x:g(6), y:g(8), z:g(10), batt_mv:dv.getUint16(12), rate_hz:dv.getUint8(2)};
+        mac = macAt(dv, 15);
+      } else if (t === 0x40) {                         // 40 00 rate batt 00 01 MAC ..
+        info = {batt_mv:dv.getUint16(3), rate_hz:dv.getUint8(2)};
+        mac = macAt(dv, 7);
+      }
+    } else if (u.startsWith(FEAA) && dv.byteLength >= 14 && dv.getUint8(0) === 0x20) {
+      tlm = {batt_mv:dv.getUint16(2), temp_c:r1(dv.getInt16(4)/256)};
+    }
+  }
+  if (!mac) return;   // Chrome MAC vermez; MAC'i FEAB çerçevesinin içinden öğrenip cihaz kimliğine bağlıyoruz
+  idMac[ev.device.id] = mac;
+  const rssi = ev.rssi ?? null;
+  seen[mac] = Object.assign(seen[mac] || {}, {seen:now}, rssi != null && {rssi}, acc && {acc});
+  if (mac !== CFG.door_mac && mac !== CFG.body_mac) return;
+  lastRx = now;
+  const lv = live[mac] = live[mac] || {};
+  Object.assign(lv, {seen:now}, rssi != null && {rssi}, tlm, info);
+  if (acc) {
+    const buf = samples[mac] = samples[mac] || [];
+    if (!buf.length || now - buf[buf.length-1][0] > 0.05) {   // aynı reklamın tekrarı olan çift olayı at
+      buf.push([now, acc.x, acc.y, acc.z, rssi]);
+      if (buf.length > 200) buf.shift();
+    }
+    Object.assign(lv, acc);
+  }
+}
+
+let scan = null, wake = null, actx = null;
+async function toggleScan() {
+  if (scan) {
+    scan.stop(); scan = null;
+    navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
+    wake && wake.release().catch(() => {}); wake = null;
+    return render();
+  }
+  if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) { $('help').style.display = ''; return msg('Bu tarayıcı BLE taramasını desteklemiyor (aşağıdaki adımlara bakın)'); }
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+  try {
+    navigator.bluetooth.addEventListener('advertisementreceived', onAdv);
+    scan = await navigator.bluetooth.requestLEScan({acceptAllAdvertisements:true, keepRepeatedDevices:true});
+    msg('');
+    keepAwake();
+  } catch (e) {
+    navigator.bluetooth.removeEventListener('advertisementreceived', onAdv);
+    scan = null; msg('Tarama başlatılamadı: ' + e.message + ' (Bluetooth ve Konum açık mı, izin verildi mi?)');
+  }
+  render();
+}
+async function keepAwake() {
+  try { if (scan && navigator.wakeLock && document.visibilityState === 'visible') wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', keepAwake);
+
+function alarm() {
+  try { navigator.vibrate && navigator.vibrate([500, 200, 500, 200, 500]); } catch (e) {}
+  if (!CFG.sound || !actx) return;
+  try {
+    actx.resume();
+    for (let i = 0; i < 3; i++) {
+      const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i*0.45;
+      o.frequency.value = 1400; o.type = 'square'; g.gain.value = 0.25;
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + 0.3);
+    }
+  } catch (e) {}
+}
+
+// ---------- 3B vektör görünümü ----------
+const VIEW0 = {yaw:-0.75, pit:0.42, zoom:1};
+const view = {...VIEW0};
+const RNG = 1300, FLOOR = -1300;
+const AXC = {X:'#f0883e', Y:'#3fb950', Z:'#58a6ff'};
+let vmode = 'cor';
+
+function makeProj(W, H) {
+  const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pit), sp = Math.sin(view.pit);
+  const s = Math.min(W, H)*0.32*view.zoom/RNG;
+  return ([x, y, z]) => {
+    const x1 = x*cy - y*sy, y1 = x*sy + y*cy;
+    const up = y1*sp + z*cp, d = y1*cp - z*sp;
+    const f = 4200/(4200 + d);
+    return {x: W/2 + x1*s*f, y: H/2 - up*s*f, d, f};
+  };
+}
+const alphaOf = d => Math.max(0.25, Math.min(1, 0.65 - d/3600));
+function seg(g, P, a, b, color, width, alpha, dash) {
+  const p = P(a), q = P(b);
+  g.globalAlpha = alpha ?? alphaOf((p.d + q.d)/2); g.strokeStyle = color; g.lineWidth = width;
+  g.setLineDash(dash || []); g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(q.x, q.y); g.stroke();
+  g.setLineDash([]); g.globalAlpha = 1;
+}
+const placed = []; let lbW = 0, lbH = 0;
+const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+function label(g, p, text, color, dx = 8, dy = -8, fixed = false) {
+  g.font = '12px system-ui'; const w = g.measureText(text).width;
+  let best = null;
+  const steps = fixed ? [0] : [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5];
+  search: for (const st of steps) for (const side of [1, -1]) {
+    const ox = side > 0 ? dx : -(w + dx), oy = dy + st*19;
+    const r = {x: p.x + ox - 3, y: p.y + oy - 12, w: w + 6, h: 16, ox, oy, moved: st !== 0 || side < 0};
+    if (!fixed && (r.x < 2 || r.x + r.w > lbW - 2 || r.y < 2 || r.y + r.h > lbH - 24)) continue;
+    if (!placed.some(q => hit(r, q))) { best = r; break search; }
+  }
+  if (!best) best = {x: p.x + dx - 3, y: p.y + dy - 12, w: w + 6, h: 16, ox: dx, oy: dy, moved: false};
+  placed.push(best);
+  if (best.moved) {
+    g.globalAlpha = .6; g.strokeStyle = color; g.lineWidth = 1; g.beginPath();
+    g.moveTo(p.x, p.y); g.lineTo(best.x + (best.ox >= 0 ? 0 : best.w), best.y + 8); g.stroke(); g.globalAlpha = 1;
+  }
+  g.fillStyle = 'rgba(15,20,25,.88)'; g.fillRect(best.x, best.y, best.w, best.h);
+  g.fillStyle = color; g.fillText(text, best.x + 3, best.y + 12);
+}
+function drawVec(cv, items, footer, opts = {}) {
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W*dpr; cv.height = H*dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr);
+  const P = makeProj(W, H);
+  placed.length = 0; lbW = W; lbH = H;
+  for (let k = -1200; k <= 1200; k += 400) {
+    seg(g, P, [k, -1200, FLOOR], [k, 1200, FLOOR], '#2a3441', 1, .8);
+    seg(g, P, [-1200, k, FLOOR], [1200, k, FLOOR], '#2a3441', 1, .8);
+  }
+  [[0,1],[0,2],[1,2]].forEach(([i, j]) => {
+    const pt = a => { const v = [0,0,0]; v[i] = 1000*Math.cos(a); v[j] = 1000*Math.sin(a); return v; };
+    for (let n = 0; n < 72; n++) seg(g, P, pt(n*Math.PI/36), pt((n+1)*Math.PI/36), '#4b5a6b', 1.2);
+  });
+  [['X',[1,0,0]], ['Y',[0,1,0]], ['Z',[0,0,1]]].forEach(([n, u]) => {
+    const at = m => u.map(c => c*m);
+    seg(g, P, at(0), at(RNG), AXC[n], 1.6, 1);
+    seg(g, P, at(0), at(-RNG), AXC[n], 1, .5, [4, 4]);
+    label(g, P(at(RNG)), '+' + n, AXC[n], 4, -4, true); label(g, P(at(-RNG)), '−' + n, AXC[n], 4, -4, true);
+  });
+  if (!items.length) { g.fillStyle = '#8b98a5'; g.font = '13px system-ui'; g.fillText(footer || 'vektör verisi bekleniyor…', 12, 22); return; }
+  const lv = items.filter(it => !it.ghost);
+  if (opts.wedge && lv.length === 2) {
+    const o = P([0,0,0]), a = P(lv[0].v), b = P(lv[1].v);
+    g.fillStyle = 'rgba(255,255,255,.10)'; g.beginPath(); g.moveTo(o.x, o.y); g.lineTo(a.x, a.y); g.lineTo(b.x, b.y); g.closePath(); g.fill();
+  }
+  items.slice().sort((p, q) => P(q.v).d - P(p.v).d).forEach(it => {
+    const o = P([0,0,0]), t = P(it.v), v = it.v, fl = [v[0], v[1], FLOOR];
+    if (it.ghost) { seg(g, P, [0,0,0], v, it.c, 1.6, .55, [6, 5]); label(g, t, it.l, it.c, 6, 14); return; }
+    seg(g, P, [0,0,FLOOR], fl, it.c, 2, .30);
+    seg(g, P, v, fl, it.c, 1, .35, [3, 4]);
+    g.strokeStyle = g.fillStyle = it.c; g.lineWidth = 3.2*t.f;
+    g.beginPath(); g.moveTo(o.x, o.y); g.lineTo(t.x, t.y); g.stroke();
+    const ang = Math.atan2(t.y - o.y, t.x - o.x), hl = 15*t.f, hw = 6.5*t.f;
+    g.beginPath(); g.moveTo(t.x, t.y);
+    g.lineTo(t.x - hl*Math.cos(ang) + hw*Math.sin(ang), t.y - hl*Math.sin(ang) - hw*Math.cos(ang));
+    g.lineTo(t.x - hl*Math.cos(ang) - hw*Math.sin(ang), t.y - hl*Math.sin(ang) + hw*Math.cos(ang)); g.closePath(); g.fill();
+    g.beginPath(); g.arc(o.x, o.y, 3.5, 0, 7); g.fill();
+    label(g, t, `${it.l} (${v.map(Math.round).join(', ')})`, it.c, 10, -10);
+  });
+  g.fillStyle = '#e6edf3'; g.font = '13px system-ui'; g.fillText(footer || '', 10, H - 10);
+}
+function vecView() {
+  // Ham vektörler (kendi eksenlerinde) ve offset sonrası (kalibrasyondaki gövde -Z'ye oturtulmuş)
+  const now = Date.now()/1000, v = {};
+  for (const [role, mac] of [['door', CFG.door_mac], ['body', CFG.body_mac]]) {
+    const lv = live[mac];
+    if (lv && 'x' in lv && now - lv.seen < 15) v[role] = [lv.x, lv.y, lv.z];
+  }
+  let cor = null;
+  if (cal.R && v.door && v.body) {
+    const cd = matvec(cal.R, v.door), A = minRotation(cal.rest.body, [0, 0, -1]);
+    cor = {door:matvec(A, cd), body:matvec(A, v.body), rest:matvec(A, cal.rest.body), angle:r1(angleDeg(cd, v.body))};
+  }
+  return {raw:v, cor};
+}
+function drawVectors() {
+  const {raw, cor} = vecView(), cv = $('vec');
+  if (vmode === 'raw')
+    drawVec(cv, [raw.door && {l:'Kapak', c:'#a371f7', v:raw.door}, raw.body && {l:'Gövde', c:'#f85149', v:raw.body}].filter(Boolean), 'Ham: her cihaz kendi ekseninde');
+  else
+    drawVec(cv, cor ? [{l:'Kapak', c:'#a371f7', v:cor.door}, {l:'Gövde', c:'#f85149', v:cor.body}, {l:'Gövde (kal.)', c:'#8b98a5', v:cor.rest, ghost:true}] : [],
+            cor ? `Kapak açısı (iki vektör arası): ${cor.angle}°` : (cal.R ? '' : 'Offset için ① butonuna basın'), {wedge:true});
+}
+function setView(m) { vmode = m; $('vb_cor').classList.toggle('act', m === 'cor'); $('vb_raw').classList.toggle('act', m === 'raw'); drawVectors(); }
+{ const cv = $('vec'); let drag = null, tapT = 0;
+  cv.addEventListener('pointerdown', e => {
+    const n = performance.now(); if (n - tapT < 300) { Object.assign(view, VIEW0); drawVectors(); } tapT = n;
+    drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId);
+  });
+  cv.addEventListener('pointerup', () => drag = null);
+  cv.addEventListener('pointermove', e => {
+    if (!drag) return;
+    view.yaw += (e.clientX - drag[0])*0.01; view.pit = Math.max(-1.5, Math.min(1.5, view.pit + (e.clientY - drag[1])*0.01));
+    drag = [e.clientX, e.clientY]; drawVectors();
+  });
+  cv.addEventListener('wheel', e => { e.preventDefault(); view.zoom = Math.max(.5, Math.min(3, view.zoom*(e.deltaY < 0 ? 1.1 : 1/1.1))); drawVectors(); }, {passive:false});
+}
+
+// ---------- arayüz ----------
+const fmtT = t => new Date(t*1000).toLocaleTimeString('tr-TR');
+let msgTimer = null;
+function msg(t, ok) {
+  $('msg').textContent = t; $('msg').style.color = ok ? 'var(--ok)' : 'var(--warn)';
+  clearTimeout(msgTimer); if (ok) msgTimer = setTimeout(() => $('msg').textContent = '', 3000);
+}
+
+function render() {
+  const now = Date.now()/1000, fresh = last && now - last.t <= HOLD_S, calibrated = !!cal.R;
+  $('scanbtn').textContent = scan ? 'Durdur' : 'Taramayı başlat'; $('scanbtn').classList.toggle('on', !!scan);
+  $('rxdot').classList.toggle('on', !!scan && now - lastRx < 3);
+  $('liftnow').textContent = fresh && last.lift != null ? last.lift + '°' : '-';
+  $('relnow').textContent = fresh && last.door_rel != null ? last.door_rel + '°' : '-';
+  $('liftst').textContent = !calibrated ? '-' : sm.lifted ? 'KALKIK' : 'DÜZ';
+  $('doorst').textContent = !calibrated ? '-' : sm.open ? 'AÇIK' : 'KAPALI';
+  $('mlift').className = 'metric ' + (!calibrated ? '' : sm.lifted ? 'warn' : 'off');
+  $('mdoor').className = 'metric ' + (!calibrated ? '' : sm.open ? 'on' : 'off');
+  const st = $('status');
+  st.textContent = calibrated ? sm.state : (sm.state + ' — önce offset alın');
+  st.className = sm.state.includes('AÇILDI') ? 'alarm' : sm.state === 'KAPALI' ? 'KAPALI' : sm.state === 'BEKLENİYOR' ? '' : 'lift';
+  $('calinfo').textContent = calibrated
+    ? `Kalibre: ${fmtT(cal.time)} · ${cal.lifted ? 'kalkık referans alındı (hassas)' : 'kalkık referans ilk kalkışta otomatik alınacak'}`
+    : 'Kalibre edilmedi';
+  $('calvec').innerHTML = cal.rest
+    ? `Kapak vektörü: ${cal.rest.door.map(Math.round).join(' / ')} mg<br>Gövde vektörü: ${cal.rest.body.map(Math.round).join(' / ')} mg<br>Ham vektörler arası offset: <b>${r1(angleDeg(cal.rest.door, cal.rest.body))}°</b>` +
+      (cal.lifted ? `<br>Kalkık referans: dorse ${r1(angleDeg(cal.rest.body, cal.lifted.body))}° eğik` : '')
+    : '';
+  $('hyst').textContent = `Histerezis: kapak kapandı < ${(CFG.door_off).toFixed(1)}°, dorse indi < ${(CFG.lift_off).toFixed(1)}°`;
+
+  const name = {[CFG.door_mac]:'Kapak', [CFG.body_mac]:'Gövde'};
+  const rows = [CFG.door_mac, CFG.body_mac].map(m => {
+    const v = live[m];
+    if (!v) return `<tr><td>${name[m]}</td><td colspan="7" class="mut">${m} · görülmedi</td></tr>`;
+    const age = r1(now - v.seen);
+    return `<tr><td>${name[m]}</td><td>${v.rssi ?? '-'}</td><td>${v.batt_mv ?? '-'}</td><td>${v.temp_c ?? '-'}</td>
+      <td>${v.x ?? '-'}</td><td>${v.y ?? '-'}</td><td>${v.z ?? '-'}</td><td style="${age > 5 ? 'color:var(--bad)' : ''}">${age}</td></tr>`;
+  }).join('');
+  $('live').innerHTML = `<table><tr><th>Cihaz</th><th>RSSI</th><th>Pil mV</th><th>°C</th><th>X</th><th>Y</th><th>Z</th><th>Son sn</th></tr>${rows}</table>`;
+
+  const sl = Object.entries(seen).filter(([, v]) => now - v.seen < 30).sort((a, b) => (b[1].rssi ?? -999) - (a[1].rssi ?? -999));
+  $('seen').innerHTML = sl.length
+    ? '<table><tr><th>MAC</th><th>RSSI</th><th>Rol</th><th></th></tr>' + sl.map(([m, v]) =>
+        `<tr><td>${m}</td><td>${v.rssi ?? '-'}</td><td>${name[m] || '-'}</td><td>${name[m] ? '' :
+          `<button class="small sec" onclick="assign('door','${m}')">Kapak</button> <button class="small sec" onclick="assign('body','${m}')">Gövde</button>`}</td></tr>`).join('') + '</table>'
+    : `<span class="mut">${scan ? 'IMU beacon bekleniyor…' : 'Tarama başlayınca listelenir.'}</span>`;
+
+  $('events').innerHTML = '<tr><th>Zaman</th><th>Durum</th><th>Eğim</th><th>Kapak</th></tr>' +
+    events.slice(0, 50).map(e => `<tr class="${e.alarm ? 'alarm-row' : ''}"><td>${fmtT(e.t)}</td><td>${e.state}</td><td>${e.lift}°</td><td>${e.door_rel == null ? '-' : e.door_rel + '°'}</td></tr>`).join('');
+  for (const k of ['lift_on', 'door_on', 'ma_s', 'door_mac', 'body_mac']) if (document.activeElement !== $(k)) $(k).value = CFG[k];
+  if (document.activeElement !== $('sound')) $('sound').checked = !!CFG.sound;
+  drawVectors();
+}
+
+function setMacs(d, b) {
+  if (d === b) return msg("Kapak ve gövde MAC'i aynı olamaz");
+  if (d === CFG.door_mac && b === CFG.body_mac) return;
+  CFG.door_mac = d; CFG.body_mac = b; saveCfg_(); resetData(); msg("MAC'ler kaydedildi, kalibrasyon sıfırlandı", true); render();
+}
+function saveMacs() {
+  const d = normMac($('door_mac').value), b = normMac($('body_mac').value);
+  if (!d || !b) return msg('Geçersiz MAC (12 hex hane olmalı)');
+  if (d === CFG.door_mac && b === CFG.body_mac) return;
+  if (confirm('MAC değişirse mevcut kalibrasyon ve olaylar silinir. Devam edilsin mi?')) setMacs(d, b);
+}
+function assign(role, mac) {
+  const d = role === 'door' ? mac : CFG.door_mac, b = role === 'body' ? mac : CFG.body_mac;
+  if (confirm(`${mac} ${role === 'door' ? 'kapak' : 'gövde'} cihazı yapılsın mı? (kalibrasyon silinir)`)) setMacs(d, b);
+}
+function swap() {
+  if (confirm('Kapak ve gövde rolleri yer değiştirsin mi? (kalibrasyon silinir)')) setMacs(CFG.body_mac, CFG.door_mac);
+}
+function saveCfg() {
+  const lo = +$('lift_on').value, dr = +$('door_on').value, ma = +$('ma_s').value;
+  if (!(lo > 0 && dr > 0 && ma > 0)) return msg('Geçersiz değer');
+  Object.assign(CFG, {lift_on:lo, lift_off:lo*.6, door_on:dr, door_off:dr*.55, ma_s:Math.min(30, Math.max(0.5, ma)), sound:$('sound').checked});
+  saveCfg_(); msg('Ayarlar kaydedildi', true); render();
+}
+
+if (!navigator.bluetooth || !navigator.bluetooth.requestLEScan) $('help').style.display = '';
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+addEventListener('resize', drawVectors);
+render();
+setInterval(tick, TICK_S*1000);
+</script>
+</body>
+</html>
